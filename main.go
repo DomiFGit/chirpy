@@ -23,6 +23,7 @@ import (
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	dbQueries *database.Queries
+	platform string
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -49,6 +50,7 @@ func main() {
 
 	cfg := &apiConfig{}
 	cfg.dbQueries = database.New(db)
+	cfg.platform = os.Getenv("PLATFORM")
 
 	mux := http.NewServeMux()
 	mux.Handle("/app/", http.StripPrefix("/app/", cfg.middlewareMetricsInc(http.FileServer(http.Dir(".")))))
@@ -64,6 +66,20 @@ func main() {
 		w.Write([]byte(message))
 	})
 	mux.HandleFunc("POST /admin/reset", func (w http.ResponseWriter, r *http.Request){
+		if cfg.platform != "dev" {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(403)
+			w.Write([]byte("not dev system"))
+			return
+		}
+		
+		err := cfg.dbQueries.DeleteAllUsers(r.Context())
+		if err != nil {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(500)
+			w.Write([]byte("error deleting users"))
+		}
+
 		cfg.fileserverHits.Store(0)
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
@@ -105,8 +121,48 @@ func main() {
 		w.Write(resp)
 
 	})
-	
 
+		mux.HandleFunc("POST /api/users", func (w http.ResponseWriter, r *http.Request) {
+			type errorResp struct {
+				Error string `json:"error"`
+			}
+			//decode Request
+			type params struct {
+				Email string `json:"email"` 
+			}
+			var p params 
+			decoder := json.NewDecoder(r.Body)
+			if err := decoder.Decode(&p); err != nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(500)
+				resp, _ := json.Marshal(errorResp{Error: "wrong payload format"})
+				w.Write(resp)
+				return
+			}
+			//run db Queries
+			user, err := cfg.dbQueries.CreateUser(r.Context(), p.Email)
+			if err != nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(500)
+				resp, _ := json.Marshal(errorResp{Error: "server error creating user"})
+				w.Write(resp)
+				return
+			}
+			//serialize returned user
+			serializedUser, err := json.Marshal(user)
+			if err != nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(500)
+				resp, _ := json.Marshal(errorResp{Error: "response could not be serialixed"})
+				w.Write(resp)
+				return
+			}
+			//return 201 + user
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(201)
+			w.Write(serializedUser)
+		})
+	
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
