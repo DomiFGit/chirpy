@@ -29,7 +29,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/app/", http.StripPrefix("/app/", h.MiddlewareMetricsInc(http.FileServer(http.Dir(".")))))
 	mux.HandleFunc("GET /api/healthz", h.Healthz)
-	mux.HandleFunc("POST /api/validate_chirp", h.ValidateChirp)
+	mux.HandleFunc("POST /api/chirps", h.InsertChirp)
 	mux.HandleFunc("POST /api/users", h.CreateUser)
 	mux.HandleFunc("GET /admin/metrics", h.Metrics)
 	mux.HandleFunc("POST /admin/reset", h.Reset)

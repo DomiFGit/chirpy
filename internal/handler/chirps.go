@@ -5,6 +5,10 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+
+	"github.com/google/uuid"
+
+	"github.com/domifgit/chirpy/internal/database"
 )
 
 func filterChirp(text string) string {
@@ -14,15 +18,13 @@ func filterChirp(text string) string {
 	return re.ReplaceAllString(text, "****")
 }
 
-func (h *Handler) ValidateChirp(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) InsertChirp(w http.ResponseWriter, r *http.Request) {
 	type chirp struct {
 		Body string `json:"body"`
+		User string `json:"user_id"`
 	}
 	type errorResp struct {
 		Error string `json:"error"`
-	}
-	type validResp struct {
-		CleanedBody string `json:"cleaned_body"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -42,9 +44,25 @@ func (h *Handler) ValidateChirp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	cleanedBody := filterChirp(c.Body)
+	userID, err := uuid.Parse(c.User)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(500)
+		resp, _ := json.Marshal(errorResp{Error: "Invalid user ID"})
+		w.Write(resp)
+		return
+	}
+	createChirpParams := database.CreateChirpParams{UserID: userID, Body: cleanedBody}
+	createdChirp, err := h.dbQueries.CreateChirp(r.Context(), createChirpParams)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(500)
+		resp, _ := json.Marshal(errorResp{Error: "Could not create chirp"})
+		w.Write(resp)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	clean := filterChirp(c.Body)
-	resp, _ := json.Marshal(validResp{CleanedBody: clean})
-	w.Write(resp)
+	w.WriteHeader(201)
+	json.NewEncoder(w).Encode(createdChirp)
 }
